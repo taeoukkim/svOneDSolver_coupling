@@ -156,8 +156,8 @@ extern "C" void get_coupled_solution_1d(int problem_id, int num_surfaces,
                                         double* flows_out,
                                         double* pressures_out);
 
-extern "C" void run_1d_simulation_step_1d(int problem_id, double dt,
-                                          int& error_code);
+extern "C" void run_1d_simulation_step_1d(int problem_id, double current_time,
+                                          double* solution_vector, int& error_code);
 
 extern "C" void get_resistance_matrix_1d(int problem_id, int num_surfaces,
                                          double** resistance_matrix);
@@ -619,39 +619,91 @@ void get_coupled_solution_1d(int problem_id, int num_surfaces,
 
 /**
  * @brief Run one time step of the 1D simulation.
+ * 
+ * Performs a single time step of 1D blood flow simulation by calling the 
+ * underlying solver's SolveSingleTimeStep function. Returns the solution
+ * vector (pressure and flow) after the time step.
  *
  * @param problem_id The ID used to identify the 1D problem.
- * @param dt Time step size
+ * @param current_time Current simulation time (seconds)
+ * @param solution_vector Output vector containing pressure and flow values
+ *                       Size: 2*system_size (pressure[0..system_size-1], flow[system_size..2*system_size-1])
  * @param error_code Output error code (0 = success, <0 = error)
  */
-void run_1d_simulation_step_1d(int problem_id, double dt, int& error_code) {
-  auto it = OneDSolverInterface::interface_list_.find(problem_id);
+void run_1d_simulation_step_1d(int problem_id, double current_time, 
+                                double* solution_vector, int& error_code) {
+  auto it = OneDSolverInterface::interface_list_.find(problem_id); //problem_id에 해당되는 interface 객체를 찾음
   if (it == OneDSolverInterface::interface_list_.end()) {
-    cerr << "Error: problem_id " << (int)problem_id << " not found" << endl;
+    cerr << "[run_1d_simulation_step_1d] Error: problem_id " 
+         << static_cast<int>(problem_id) << " not found" << endl;
     error_code = -1;
     return;
   }
 
-  auto interface = it->second;
+  auto interface = it->second; // map에서 problem_id에 해당하는 interface 객체를 가져옴(second: value)
   error_code = 0;
 
   try {
-    cout << "[run_1d_simulation_step_1d] Time step " << (int)interface->time_step_
-         << ", dt = " << dt << " s" << endl;
+    cout << "[run_1d_simulation_step_1d] ========================================" << endl;
+    cout << "[run_1d_simulation_step_1d] Time step " 
+         << static_cast<int>(interface->time_step_)
+         << ", current_time = " << current_time << " s" << endl;
 
-    // Store previous solution
+    // Store previous solution for coupling calculations
     interface->previous_flows_ = interface->current_flows_;
     interface->previous_pressures_ = interface->current_pressures_;
 
-    // Update time
-    interface->time_step_++;
-    interface->current_time_ += dt;
+    // Update current time in solver
+    cvOneDBFSolver::currentTime = current_time;
+    
+    // Call the underlying 1D solver to compute one time step
+    // SolveSingleTimeStep returns a pointer to the solution vector
+    cvOneDFEAVector* solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time);
+    
+    if (solution_ptr == nullptr) {
+      throw std::runtime_error("SolveSingleTimeStep returned null pointer");
+    }
+    
+    // Extract solution from solver
+    // The solution is stored in TotalSolution matrix:
+    // TotalSolution[i][0] = pressure at node i
+    // TotalSolution[i][1] = flow at node i
+    cvOneDModel* model = cvOneDBFSolver::GetModelPtr();
+    if (!model) {
+      throw std::runtime_error("Model pointer is null in cvOneDBFSolver");
+    }
 
-    cout << "[run_1d_simulation_step_1d] Step completed, time = " 
-         << interface->current_time_ << " s" << endl;
+    int num_nodes = model->getNumberOfNodes();
+    
+    // Fill solution vector: [pressure_0, pressure_1, ..., flow_0, flow_1, ...]
+    for (int i = 0; i < num_nodes; i++) {
+      // Pressure values (first half)
+      solution_vector[i] = cvOneDBFSolver::GetSolution(i, 0);
+      
+      // Flow values (second half)
+      solution_vector[num_nodes + i] = cvOneDBFSolver::GetSolution(i, 1);
+    }
+
+    // Update interface internal states
+    interface->time_step_++;
+    interface->current_time_ = current_time;
+
+    // // Update coupled surface flows and pressures from solution
+    // // (This depends on your coupled segment configuration)
+    // for (size_t i = 0; i < interface->coupled_segment_ids_.size(); i++) {
+    //   int seg_id = interface->coupled_segment_ids_[i];
+    //   // Extract flow and pressure from coupled segment
+    //   // This requires mapping segment ID to node indices
+    //   // TODO: Implement segment-to-node mapping based on your model structure
+    // }
+
+    cout << "[run_1d_simulation_step_1d] Time step completed" << endl;
+    cout << "[run_1d_simulation_step_1d] Returned " << num_nodes * 2 
+         << " solution values" << endl;
+    cout << "[run_1d_simulation_step_1d] ========================================" << endl;
 
   } catch (const std::exception& e) {
-    cerr << "Error in run_1d_simulation_step_1d: " << e.what() << endl;
+    cerr << "[run_1d_simulation_step_1d] Error: " << e.what() << endl;
     error_code = -1;
   }
 }
