@@ -1054,6 +1054,39 @@ void cvOneDBFSolver::Solve(void){
   }
 }
 
+// Sub function for the 3D-1D coupling
+// first part of the Solve function
+void cvOneDBFSolver::Solve_initi(int& systemsize_){
+  char errStr[256];
+  // First check to make sure we've set a model pointer
+  // Prior to solution attempt.
+  if(model == NULL){
+    cvOneDError::setErrorNumber(ErrorTypeScope::BAD_VALUE);
+    strcpy(errStr,"In BFSolver::Solve(...), No model pointer was set prior to solution attempt.  Bailing out to avoid a coredump!");
+    cvOneDError::setErrorString(errStr);
+    cvOneDError::CallErrorHandler();
+    exit(0);
+  }
+
+  // Query the model for information, this is where
+  // the subdomain and material information get passed.
+  QuerryModelInformation();
+
+  DefineMthModels();
+
+  CreateGlobalArrays();
+
+  long id;
+  id = model -> getNumberOfSegments();
+
+  int i;
+  for (i=0; i<id; i++){
+    CalcInitProps(i);
+  }
+  systemsize_ = static_cast<int>(previousSolution->GetDimension());
+  //std::cout << "systemsize_: " << (int)systemsize_ << std::endl;
+}
+
 void cvOneDBFSolver::DefineInletFlow(double* time, double* flrt, int num){
   flowTime = new double[num];
   flowRate = new double[num];
@@ -1478,7 +1511,7 @@ void cvOneDBFSolver::GenerateSolution(void){
       // Add increment
       increment->Clear();
 
-      cvOneDGlobal::solver->Solve(*increment);
+      cvOneDGlobal::solver->Solve(*increment); // solve for the increment: LHS*increment = RHS
 
       currentSolution->Add(*increment);
 
@@ -1555,30 +1588,30 @@ void cvOneDBFSolver::GenerateSolution(void){
     // Increment Iteration Number
     iter++;
 
-  }// End while
+    }// End while
 
-  checkMass += mathModels[0]->CheckMassBalance() * deltaTime;
-  cout << "  Time = " << currentTime << ", ";
-  cout << "Mass = " << checkMass << ", ";
-  cout << "Tot iters = " << std::to_string(iter) << endl;
+    checkMass += mathModels[0]->CheckMassBalance() * deltaTime;
+    cout << "  Time = " << currentTime << ", ";
+    cout << "Mass = " << checkMass << ", ";
+    cout << "Tot iters = " << std::to_string(iter) << endl;
 
-  // Save solution if needed
-  if(step % stepSize == 0){
-    sprintf( String2, "%ld", (unsigned long)step);
-    title = String1 + String2;
-    currentSolution->Rename(title.data());
+    // Save solution if needed
+    if(step % stepSize == 0){
+      sprintf( String2, "%ld", (unsigned long)step);
+      title = String1 + String2;
+      currentSolution->Rename(title.data());
 
-    double * tmp = currentSolution -> GetEntries();
-    int j;
+      double * tmp = currentSolution -> GetEntries();
+      int j;
 
-    for(j=0;j<currentSolution -> GetDimension(); j++){
-      TotalSolution[q][j] = tmp[j];
+      for(j=0;j<currentSolution -> GetDimension(); j++){
+        TotalSolution[q][j] = tmp[j];
+      }
+      q++;
     }
-    q++;
-  }
-  *previousSolution = *currentSolution;
-  iter_total += iter;
-  } // End global loop
+    *previousSolution = *currentSolution;
+    iter_total += iter;
+  } // End global time loop
 
   cout << "\nAvgerage number of Newton-Raphson iterations per time step = "<<(double)iter_total / (double)maxStep<<"\n"<< endl;
 }
