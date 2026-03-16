@@ -490,15 +490,34 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
 
         // 여기부터는 Solve() 함수 부분 중에서도 GenerateSolution 이전부분
         cvOneDBFSolver::Solve_initi(systemSize); // TODO: 지금 이 안에도 커플링위해서 바꿔야하는 함수들 많음
-        //cout << "system size: " << static_cast<int>(systemSize) << endl; // total number of unknows in the system. #NODE x 2 (flow&area) 
+        // output: systemSize, which is the total number of unknowns in the system. #NODE x 2 (flow&area)
+        // cout << "system size: " << static_cast<int>(systemSize) << endl; // total number of unknows in the system. #NODE x 2 (flow&area) 
+
+
+        // TODO: 이제 generateSolution 에 들어왔음.
+        // time loop 시작 전에 필요한 초기화 작업들
+        // 여기부터는 Solve() 함수 부분 중에서도 GenerateSolution 이전부분
+        cout << "[initialize_1d] Model initialized, preparing for time-stepping..." << endl;
+
+        //EquationInitialize() 호출
+        try {
+            cvOneDBFSolver::InitializeAllEquations();
+            cout << "[initialize_1d] Equations initialized successfully" << endl;
+        } catch (const std::exception& e) {
+            cerr << "[initialize_1d] Error initializing equations: " << e.what() << endl;
+            throw;
+        }
+
+        // Time loop initialization
+        interface->current_time_ = 0.0;
+        interface->time_step_ = 0;
+
+        cout << "[initialize_1d] 1D model is ready for time-stepping" << endl;
+      
+
 
 
         cout << "TEST~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~" << endl;
-
-        // TODO: 이제 generateSolution 에 들어왔음.
-        // 이걸 타임루프 안/밖으로 나누어서 만들어야함
-
-
 
 
 
@@ -508,9 +527,9 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
 
 
     }else {
-        cout << "[initialize] WARNING: No simulation options found" << endl;
+        cout << "[initialize_1d] WARNING: No simulation options found" << endl;
     }
-    cout << "[initialize] 1D model initialized successfully" << endl;
+    cout << "[initialize_1d] 1D model initialized successfully" << endl;
     
   } catch (const std::exception& e) {
     cerr << "Error in initialize_1d: " << e.what() << endl;
@@ -636,6 +655,8 @@ void run_1d_simulation_step_1d(int problem_id, double dt, int& error_code) {
     error_code = -1;
   }
 }
+
+
 
 /**
  * @brief Get the resistance matrix (sensitivity) dP/dQ for coupling.

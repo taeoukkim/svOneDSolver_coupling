@@ -1085,6 +1085,7 @@ void cvOneDBFSolver::Solve_initi(int& systemsize_){
   }
   systemsize_ = static_cast<int>(previousSolution->GetDimension());
   //std::cout << "systemsize_: " << (int)systemsize_ << std::endl;
+
 }
 
 void cvOneDBFSolver::DefineInletFlow(double* time, double* flrt, int num){
@@ -1614,4 +1615,104 @@ void cvOneDBFSolver::GenerateSolution(void){
   } // End global time loop
 
   cout << "\nAvgerage number of Newton-Raphson iterations per time step = "<<(double)iter_total / (double)maxStep<<"\n"<< endl;
+}
+
+void cvOneDBFSolver::InitializeAllEquations() {
+    cout << "[InitializeAllEquations] Starting equation initialization..." << endl;
+    
+    if(mathModels.empty()) {
+        throw cvException("ERROR: mathModels is empty. DefineMthModels() must be called first.");
+    }
+    
+    if(!previousSolution || !currentSolution) {
+        throw cvException("ERROR: previousSolution or currentSolution is not initialized.");
+    }
+    
+    int numMath = mathModels.size();
+    for(int i = 0; i < numMath; i++) {
+        mathModels[i]->EquationInitialize(previousSolution, currentSolution);
+    }
+    
+    cout << "[InitializeAllEquations] Equation initialization completed successfully" << endl;
+}
+
+cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
+    currentTime = currentTimeInput;
+    
+    clock_t tstart_iter;
+    clock_t tend_iter;
+    
+    // Update time-dependent models
+    int numMath = mathModels.size();
+    for(int i = 0; i < numMath; i++) {
+        mathModels[i]->TimeUpdate(currentTime, deltaTime);
+    }
+    
+    // Initialize Newton-Raphson iteration
+    int iter = 0;
+    double normf = 1.0;
+    double norms = 1.0;
+    
+    // Advance current time
+    currentTime += deltaTime;
+    
+    // Newton-Raphson Iterations
+    while(true) {
+        tstart_iter = clock();
+        
+        increment->Clear();
+        
+        // Form Newton system
+        for(int i = 0; i < numMath; i++) {
+            mathModels[i]->FormNewton(lhs, rhs);
+        }
+        
+        // Apply boundary conditions
+        mathModels[0]->ApplyBoundaryConditions();
+        
+        // Calculate residual norms
+        if(jointList.size() != 0) {
+            normf = rhs->Norm(L2_norm, 1, 2, jointList[0]->GetGlobal1stLagNodeID());
+            norms = rhs->Norm(L2_norm, 0, 2, jointList[0]->GetGlobal1stLagNodeID());
+        } else {
+            normf = rhs->Norm(L2_norm, 1, 2);
+            norms = rhs->Norm(L2_norm, 0, 2);
+        }
+        
+        // Check convergence
+        if((currentTime != deltaTime || (currentTime == deltaTime && iter != 0)) && 
+           normf < convCriteria && norms < convCriteria) {
+            cout << "    iter: " << std::to_string(iter) << " normf: " << std::to_string(normf) << " norms: " << std::to_string(norms) << endl;
+            break;
+        }
+        
+        // Solve linear system
+        cvOneDGlobal::solver->Solve(*increment);
+        currentSolution->Add(*increment);
+        
+        // Check for negative areas
+        if(jointList.size() != 0) {
+            currentSolution->CheckPositive(0, 2, jointList[0]->GetGlobal1stLagNodeID());
+        } else {
+            currentSolution->CheckPositive(0, 2, currentSolution->GetDimension());
+        }
+        
+        // Set boundary conditions
+        mathModels[0]->SetBoundaryConditions();
+        tend_iter = clock();
+        
+        cout << "    iter: " << std::to_string(iter) << " normf: " << std::to_string(normf) << " norms: " << std::to_string(norms) << endl;
+        
+        if(iter > MAX_NONLINEAR_ITERATIONS) {
+            cout << "Error: Newton not converged, exceed max iterations" << endl;
+            break;
+        }
+        
+        iter++;
+    }
+    
+    // Update previous solution for next time step
+    *previousSolution = *currentSolution;
+    
+    return currentSolution;
 }
