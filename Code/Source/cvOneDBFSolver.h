@@ -78,6 +78,10 @@ class cvOneDBFSolver{
     static void Solve_initi(int& systemsize_);
     static void InitializeAllEquations();
     static cvOneDFEAVector* SolveSingleTimeStep(double currentTimeInput);
+    static void ConvertSolutionToFlowPressure(cvOneDFEAVector* solution_ptr, 
+                                          double* solution_vector);
+    static void postprocess_VTK_XML3D_SingleTimeStep(int timeStep, 
+                                                    cvOneDFEAVector* solution_ptr);
 
     // Get the solution;
     static double GetSolution(int i, int j){return TotalSolution[i][j];}//IV 082103
@@ -101,6 +105,19 @@ class cvOneDBFSolver{
 
     // Find Segment index given the ID
     static int getSegmentIndex(int segID);
+
+    // for debugging
+    static double GetPreviousSolution(int index) { 
+        return (previousSolution != nullptr) ? previousSolution->Get(index) : 0.0; 
+    }
+    static double GetCurrentSolution(int index) { 
+        return (currentSolution != nullptr) ? currentSolution->Get(index) : 0.0; 
+    }
+    static int GetSubdomainListSize() { return static_cast<int>(subdomainList.size()); }
+    static int GetMathModelsSize() { return static_cast<int>(mathModels.size()); }
+    static double* GetFlowTime() { return flowTime; }
+    static double* GetFlowRate() { return flowRate; }
+    static long GetNumFlowPts() { return numFlowPts; }
 
  private:
 

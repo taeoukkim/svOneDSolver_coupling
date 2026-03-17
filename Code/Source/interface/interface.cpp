@@ -494,6 +494,7 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         // cout << "system size: " << static_cast<int>(systemSize) << endl; // total number of unknows in the system. #NODE x 2 (flow&area) 
 
 
+
         // TODO: 이제 generateSolution 에 들어왔음.
         // time loop 시작 전에 필요한 초기화 작업들
         // 여기부터는 Solve() 함수 부분 중에서도 GenerateSolution 이전부분
@@ -649,9 +650,6 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
          << static_cast<int>(interface->time_step_)
          << ", current_time = " << current_time << " s" << endl;
 
-    // Store previous solution for coupling calculations
-    interface->previous_flows_ = interface->current_flows_;
-    interface->previous_pressures_ = interface->current_pressures_;
 
     // Update current time in solver
     cvOneDBFSolver::currentTime = current_time;
@@ -659,30 +657,24 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
     // Call the underlying 1D solver to compute one time step
     // SolveSingleTimeStep returns a pointer to the solution vector
     cvOneDFEAVector* solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time);
-    
-    if (solution_ptr == nullptr) {
+    // 여기까지 GenerateSolution() 함수의 한 time step에 해당하는 부분을 가져왔음
+    cout << "Exit SolveSingleTimeStep" << endl;
+
+    // Make solution vector to transfer to 3D solver
+    // format: [flow1][pressure1][flow2][pressure2]... for each nodes
+    // currnet solution_ptr: [area1][flow1][area2][flow2]... for each nodes
+    if (solution_ptr == nullptr) { // check if the solver returned a valid solution
       throw std::runtime_error("SolveSingleTimeStep returned null pointer");
     }
-    
-    // Extract solution from solver
-    // The solution is stored in TotalSolution matrix:
-    // TotalSolution[i][0] = pressure at node i
-    // TotalSolution[i][1] = flow at node i
-    cvOneDModel* model = cvOneDBFSolver::GetModelPtr();
-    if (!model) {
-      throw std::runtime_error("Model pointer is null in cvOneDBFSolver");
-    }
+    cvOneDBFSolver::ConvertSolutionToFlowPressure(solution_ptr, solution_vector);
 
-    int num_nodes = model->getNumberOfNodes();
-    
-    // Fill solution vector: [pressure_0, pressure_1, ..., flow_0, flow_1, ...]
-    for (int i = 0; i < num_nodes; i++) {
-      // Pressure values (first half)
-      solution_vector[i] = cvOneDBFSolver::GetSolution(i, 0);
-      
-      // Flow values (second half)
-      solution_vector[num_nodes + i] = cvOneDBFSolver::GetSolution(i, 1);
+    // print solution as vtk file
+    // TODO: 나중에 3D에서 얼마나 자주 저장하는지 보고 읽어서 같은 시간에 저장. run_1d_simulation_step_1d에 추가적인 파라메터로 읽어야할듯
+    if (interface->time_step_ == 0 || interface->time_step_ == 10) {
+        cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
+        cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
     }
+    
 
     // Update interface internal states
     interface->time_step_++;
@@ -698,9 +690,6 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
     // }
 
     cout << "[run_1d_simulation_step_1d] Time step completed" << endl;
-    cout << "[run_1d_simulation_step_1d] Returned " << num_nodes * 2 
-         << " solution values" << endl;
-    cout << "[run_1d_simulation_step_1d] ========================================" << endl;
 
   } catch (const std::exception& e) {
     cerr << "[run_1d_simulation_step_1d] Error: " << e.what() << endl;

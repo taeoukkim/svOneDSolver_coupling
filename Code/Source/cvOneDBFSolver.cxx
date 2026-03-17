@@ -997,6 +997,295 @@ void cvOneDBFSolver::postprocess_VTK_XML3D_MULTIPLEFILES(){
   printf("Results Exported to VTK.\n");
 }
 
+// ===============================================
+// WRITE 3D XML VTK RESULTS FOR SINGLE TIME STEP
+// ===============================================
+void cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(
+    int timeStep, 
+    cvOneDFEAVector* solution_ptr){
+
+  // Set Constant Number of Subdivisions on the vessel circumference
+  int circSubdiv = 20;
+
+  cvOneDSegment* currSeg = NULL;
+  cvOneDMaterial* curMat = NULL;
+  cvOneDNode* currNode = NULL;
+
+  // DEFINE INCIDENCE
+  std::vector<double> segInlets(model->getNumberOfSegments());
+  std::vector<double> segOutlets(model->getNumberOfSegments());
+  for(int loopSegment=0;loopSegment<model->getNumberOfSegments();loopSegment++){
+    segInlets[loopSegment] = -1;
+    segOutlets[loopSegment] = -1;
+  }
+
+  // FORM INCIDENCE AND STORE COORDS
+  cvDoubleMat nodeList;
+  cvDoubleVec temp;
+  long* segNodes;
+  int inletNodeID = 0;
+  int outletNodeID = 0;
+  if(model->getNumberOfNodes() > 0){
+    for(int loopNode = 0; loopNode < model->getNumberOfNodes(); loopNode++){
+      temp.clear();
+      currNode = model->getNode(loopNode);
+      temp.push_back(currNode->x);
+      temp.push_back(currNode->y);
+      temp.push_back(currNode->z);
+      nodeList.push_back(temp);
+    }
+    for(int loopSegment = 0; loopSegment < model->getNumberOfSegments(); loopSegment++){
+      currSeg = model->getSegment(loopSegment);
+      segNodes = currSeg->getInOutJoints();
+      inletNodeID = segNodes[0];
+      outletNodeID = segNodes[1];
+      segInlets[loopSegment] = inletNodeID;
+      segOutlets[loopSegment] = outletNodeID;
+    }
+  }else{
+    currSeg = model->getSegment(0);
+    temp.clear();
+    temp.push_back(0.0);
+    temp.push_back(0.0);
+    temp.push_back(0.0);
+    nodeList.push_back(temp);
+    temp.clear();
+    temp.push_back(currSeg->getSegmentLength());
+    temp.push_back(0.0);
+    temp.push_back(0.0);
+    nodeList.push_back(temp);
+    segInlets[0] = 0;
+    segOutlets[0] = 1;
+  }
+
+  // Check inlets/outlets
+  for(int loopSegment=0;loopSegment<model->getNumberOfSegments();loopSegment++){
+    if(segInlets[loopSegment] == -1){
+      printf("ERROR: INLET FOR SEGMENT %d\n",loopSegment);
+    }
+    if(segOutlets[loopSegment] == -1){
+      printf("ERROR: OUTLET FOR SEGMENT %d\n",loopSegment);
+    }
+  }
+
+  // Get solution data from solution_ptr
+  double* solution_data = solution_ptr->GetEntries();
+
+  // Set and open VTK file for current time step
+  string fileName = model->getModelName();
+  char timeString[512];
+  sprintf(timeString, "_%05d", timeStep);
+  fileName = fileName + string(timeString) + ".vtp";
+  FILE* vtkFile;
+  vtkFile = fopen(fileName.c_str(),"w");
+
+  if(vtkFile == NULL){
+    cout << "ERROR: Could not open file " << fileName << endl;
+    return;
+  }
+
+  // Write VTK XML Header
+  fprintf(vtkFile,"<?xml version=\"1.0\"?>\n");
+  fprintf(vtkFile,"<VTKFile type=\"PolyData\" version=\"0.1\" byte_order=\"LittleEndian\">\n");
+  fprintf(vtkFile,"<PolyData>\n");
+
+  // Init Segment Offset
+  long segOffset = 0;
+
+  // LOOP OVER THE SEGMENTS
+  for(int loopSegment=0;loopSegment<model->getNumberOfSegments();loopSegment++){
+
+    cvDoubleMat segNodeList;
+    currSeg = model->getSegment(loopSegment);
+
+    // Compute the total number of points for this segment
+    int totSegmentSolutions = (currSeg->getNumElements()+1);
+    int totSegmentPoints = totSegmentSolutions * circSubdiv;
+
+    // Set the range for the solution of this segment
+    int startOut = segOffset;
+    int finishOut = segOffset + 2*(totSegmentSolutions);
+
+    // Get Material
+    curMat = subdomainList[loopSegment]->GetMaterial();
+
+    // Write Piece Header
+    fprintf(vtkFile,"<Piece NumberOfPoints=\"%d\" NumberOfVerts=\"0\" NumberOfLines=\"0\" NumberOfStrips=\"%ld\" NumberOfPolys=\"0\">\n",
+            totSegmentPoints, currSeg->getNumElements());
+
+    // Get inlet and outlet joints
+    int inletSegJoint = segInlets[loopSegment];
+    int outletSegJoint = segOutlets[loopSegment];
+
+    // Compute Segment Versor
+    double segVers[3][3];
+    segVers[0][0] = nodeList[outletSegJoint][0] - nodeList[inletSegJoint][0];
+    segVers[1][0] = nodeList[outletSegJoint][1] - nodeList[inletSegJoint][1];
+    segVers[2][0] = nodeList[outletSegJoint][2] - nodeList[inletSegJoint][2];
+    double mod = sqrt(segVers[0][0]*segVers[0][0] + segVers[1][0]*segVers[1][0] + segVers[2][0]*segVers[2][0]);
+    segVers[0][0] /= mod;
+    segVers[1][0] /= mod;
+    segVers[2][0] /= mod;
+
+    double lengthByNodes = mod;
+    double lengthBySegment = currSeg->getSegmentLength();
+
+    // Compute Segment Local axis system
+    evalSegmentLocalAxis(segVers);
+
+    // Loop on the number of elements
+    double currCentre[3] = {0.0};
+    double currIniArea = 0.0;
+    double currIniRad = 0.0;
+    cvDoubleVec tmp;
+
+    for(int loopEl=0;loopEl<currSeg->getNumElements() + 1;loopEl++){
+      currCentre[0] = nodeList[inletSegJoint][0] + loopEl*lengthByNodes/double(currSeg->getNumElements())*segVers[0][0];
+      currCentre[1] = nodeList[inletSegJoint][1] + loopEl*lengthByNodes/double(currSeg->getNumElements())*segVers[1][0];
+      currCentre[2] = nodeList[inletSegJoint][2] + loopEl*lengthByNodes/double(currSeg->getNumElements())*segVers[2][0];
+
+      currIniArea = currSeg->getInitInletS() + (loopEl/double(currSeg->getNumElements()))*(currSeg->getInitOutletS() - currSeg->getInitInletS());
+      currIniRad = sqrt(currIniArea/M_PI);
+
+      // Loop on the subdivisions
+      for(int loopSubdiv=0;loopSubdiv<circSubdiv;loopSubdiv++){
+        double currTheta = loopSubdiv*2*M_PI/double(circSubdiv);
+        tmp.clear();
+        tmp.push_back(currCentre[0] + currIniRad*segVers[0][1]*cos(currTheta) + currIniRad*segVers[0][2]*sin(currTheta));
+        tmp.push_back(currCentre[1] + currIniRad*segVers[1][1]*cos(currTheta) + currIniRad*segVers[1][2]*sin(currTheta));
+        tmp.push_back(currCentre[2] + currIniRad*segVers[2][1]*cos(currTheta) + currIniRad*segVers[2][2]*sin(currTheta));
+        segNodeList.push_back(tmp);
+      }
+    }
+
+    // List of Node Coordinates ready for export
+    fprintf(vtkFile,"<Points>\n");
+    fprintf(vtkFile,"<DataArray type=\"Float32\" NumberOfComponents=\"3\" format=\"ascii\">\n");
+    for(int loopA=0;loopA<segNodeList.size();loopA++){
+      fprintf(vtkFile,"%e %e %e\n",segNodeList[loopA][0],segNodeList[loopA][1],segNodeList[loopA][2]);
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+    fprintf(vtkFile,"</Points>\n");
+
+    // Write Strip Incidence and offset
+    fprintf(vtkFile,"<Strips>\n");
+    fprintf(vtkFile,"<DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">\n");
+    for(int loopA=0;loopA<currSeg->getNumElements();loopA++){
+      for(int loopB=0;loopB<circSubdiv;loopB++){
+        fprintf(vtkFile,"%d %d ",loopA*circSubdiv+loopB,loopA*circSubdiv+loopB+circSubdiv);
+      }
+      fprintf(vtkFile,"%d %d ",loopA*circSubdiv+0,loopA*circSubdiv+0+circSubdiv);
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+    fprintf(vtkFile,"<DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">\n");
+    for(int loopA=0;loopA<currSeg->getNumElements();loopA++){
+      fprintf(vtkFile,"%d ",(loopA+1)*(circSubdiv*2+2));
+    }
+    fprintf(vtkFile,"\n");
+    fprintf(vtkFile,"</DataArray>\n");
+    fprintf(vtkFile,"</Strips>\n");
+
+    // PRINT OUTPUTS
+    fprintf(vtkFile,"<PointData Scalars=\"ScalOutputs\" Vectors=\"VecOutputs\">\n");
+
+    // PRINT FLOW RATES
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"Flowrate\" NumberOfComponents=\"1\" format=\"ascii\">\n");
+    for(int j=startOut+1;j<finishOut;j+=2){
+      for(int k=0;k<circSubdiv;k++){
+        fprintf(vtkFile,"%e ",(double)solution_data[j]);
+      }
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // PRINT AREA
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"Area\" NumberOfComponents=\"1\" format=\"ascii\">\n");
+    for(int j=startOut;j<finishOut;j+=2){
+      for(int k=0;k<circSubdiv;k++){
+        fprintf(vtkFile,"%e ",(double)solution_data[j]);
+      }
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // PRINT RADIAL DISPLACEMENTS AS VECTORS
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"Disps\" NumberOfComponents=\"3\" format=\"ascii\">\n");
+    for(int j=startOut;j<finishOut;j+=2){
+      double iniArea = currSeg->getInitInletS() + (((j-startOut)/2)/double(currSeg->getNumElements()))*(currSeg->getInitOutletS() - currSeg->getInitInletS());
+      double newArea = solution_data[j];
+      double radDisp = sqrt(newArea/M_PI) - sqrt(iniArea/M_PI);
+      for(int k=0;k<circSubdiv;k++){
+        double currTheta = k*2*M_PI/double(circSubdiv);
+        tmp.clear();
+        tmp.push_back(radDisp*segVers[0][1]*cos(currTheta) + radDisp*segVers[0][2]*sin(currTheta));
+        tmp.push_back(radDisp*segVers[1][1]*cos(currTheta) + radDisp*segVers[1][2]*sin(currTheta));
+        tmp.push_back(radDisp*segVers[2][1]*cos(currTheta) + radDisp*segVers[2][2]*sin(currTheta));
+        fprintf(vtkFile,"%e %e %e ",tmp[0],tmp[1],tmp[2]);
+      }
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // PRINT PRESSURE IN MMHG
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"Pressure_mmHg\" NumberOfComponents=\"1\" format=\"ascii\">\n");
+    double segLength = currSeg->getSegmentLength();
+    int section = 0;
+    for(int j=startOut;j<finishOut;j+=2){
+      double z = (section/(double)currSeg->getNumElements())*segLength;
+      for(int k=0;k<circSubdiv;k++){
+        fprintf(vtkFile,"%e ",curMat->GetPressure(solution_data[j],z)*baryeTommHg);
+      }
+      fprintf(vtkFile,"\n");
+      section++;
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // PRINT REYNOLDS NUMBER
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"Reynolds\" NumberOfComponents=\"1\" format=\"ascii\">\n");
+    for(int j=startOut;j<finishOut;j+=2){
+      double flo = (double)solution_data[j+1];
+      double area = (double)solution_data[j];
+      double Re = curMat->GetDensity()/curMat->GetDynamicViscosity()*flo/sqrt(area)*sqrt(4.0/M_PI);
+      for(int k=0;k<circSubdiv;k++){
+        fprintf(vtkFile,"%e ",Re);
+      }
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // PRINT WSS
+    fprintf(vtkFile,"<DataArray type=\"Float32\" Name=\"WSS\" NumberOfComponents=\"1\" format=\"ascii\">\n");
+    for(int j=startOut;j<finishOut;j+=2){
+      double flo = (double)solution_data[j+1];
+      double radius = sqrt((double)solution_data[j]/M_PI);
+      double wss = 4.0*curMat->GetDynamicViscosity()*flo/(M_PI*radius*radius*radius);
+      for(int k=0;k<circSubdiv;k++){
+        fprintf(vtkFile,"%e ",wss);
+      }
+      fprintf(vtkFile,"\n");
+    }
+    fprintf(vtkFile,"</DataArray>\n");
+
+    // Close Pointdata and Piece
+    fprintf(vtkFile,"</PointData>\n");
+    fprintf(vtkFile,"</Piece>\n");
+
+    // Increment Segment Offset
+    segOffset += 2*(totSegmentSolutions);
+
+  } // End Segment Loop
+
+  // Close VTK file
+  fprintf(vtkFile,"</PolyData>\n");
+  fprintf(vtkFile,"</VTKFile>\n");
+  fclose(vtkFile);
+
+}
+
+
+
+
 // ====================
 // MAIN SOLUTION DRIVER
 // ====================
@@ -1627,8 +1916,10 @@ void cvOneDBFSolver::InitializeAllEquations() {
     if(!previousSolution || !currentSolution) {
         throw cvException("ERROR: previousSolution or currentSolution is not initialized.");
     }
-    
+
+    *currentSolution = *previousSolution;
     int numMath = mathModels.size();
+    cout << "[InitializeAllEquations] math model size: " << static_cast<int>(numMath) << endl;
     for(int i = 0; i < numMath; i++) {
         mathModels[i]->EquationInitialize(previousSolution, currentSolution);
     }
@@ -1636,11 +1927,81 @@ void cvOneDBFSolver::InitializeAllEquations() {
     cout << "[InitializeAllEquations] Equation initialization completed successfully" << endl;
 }
 
+// ===============================================
+// CONVERT SOLUTION FROM [AREA, FLOW] TO [FLOW, PRESSURE]
+// ===============================================
+void cvOneDBFSolver::ConvertSolutionToFlowPressure(
+    cvOneDFEAVector* solution_ptr, 
+    double* solution_vector){
+  
+  int num_sol = solution_ptr->GetDimension();
+  int num_nodes = num_sol / 2;
+  double* tmp = solution_ptr->GetEntries();
+  
+  cout << "Converting solution from [Area, Flow] to [Flow, Pressure]..." << endl;
+  
+  // Loop over segments to handle each material properly
+  long nodeOffset = 0;
+  
+  for(int loopSegment = 0; loopSegment < model->getNumberOfSegments(); loopSegment++){
+    
+    // Get Current Segment
+    cvOneDSegment* currSeg = model->getSegment(loopSegment);
+    
+    // Get Material for this segment
+    cvOneDMaterial* curMat = subdomainList[loopSegment]->GetMaterial();
+    
+    // Get segment properties
+    double segLength = currSeg->getSegmentLength();
+    int numElements = currSeg->getNumElements();
+    int numNodesInSegment = numElements + 1;
+    
+    // Convert nodes in this segment
+    for(int i = 0; i < numNodesInSegment; i++){
+      // Global node index in solution arrays
+      int globalNodeIdx = nodeOffset + i;
+      
+      // Get area and flow from solution_ptr
+      // Format: [area1][flow1][area2][flow2]...
+      double area = tmp[2 * globalNodeIdx];
+      double flow = tmp[2 * globalNodeIdx + 1];
+      
+      // Calculate z coordinate for this node
+      double z = (i / (double)numElements) * segLength;
+      
+      // Get pressure from material's constitutive relation
+      double pressure = curMat->GetPressure(area, z);
+      
+      // Store in solution_vector
+      // Format: [flow1][pressure1][flow2][pressure2]...
+      solution_vector[2 * globalNodeIdx] = flow;
+      solution_vector[2 * globalNodeIdx + 1] = pressure;
+    }
+    
+    // Update offset for next segment
+    nodeOffset += numNodesInSegment;
+  }
+  
+  cout << "Solution conversion completed." << endl;
+}
+
+
 cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
     currentTime = currentTimeInput;
     
     clock_t tstart_iter;
     clock_t tend_iter;
+
+    // sanity check
+    // cout << "[SolveSingleTimeStep] current solution: " << endl;
+    // for (int i = 0; i < currentSolution->GetDimension(); i++) {
+    //   cout << "  [" << static_cast<int>(i) << "] = " << (*currentSolution)[i] << endl;
+    // }
+    // cout << "[SolveSingleTimeStep] previous solution: " << endl;
+    // for (int i = 0; i < previousSolution->GetDimension(); i++) {
+    //   cout << "  [" << static_cast<int>(i) << "] = " << (*previousSolution)[i] << endl;
+    // }
+
     
     // Update time-dependent models
     int numMath = mathModels.size();
@@ -1666,6 +2027,12 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
         for(int i = 0; i < numMath; i++) {
             mathModels[i]->FormNewton(lhs, rhs);
         }
+
+        // sanity check
+        // cout << "[SolveSingleTimeStep] current solution before applying boundary conditions: " << endl;
+        // for (int i = 0; i < currentSolution->GetDimension(); i++) {
+        //   cout << "  [" << static_cast<int>(i) << "] = " << (*currentSolution)[i] << endl;
+        // }
         
         // Apply boundary conditions
         mathModels[0]->ApplyBoundaryConditions();
@@ -1678,18 +2045,71 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
             normf = rhs->Norm(L2_norm, 1, 2);
             norms = rhs->Norm(L2_norm, 0, 2);
         }
+
+        if (std::isnan(norms) || std::isnan(normf)) {
+          throw cvException("Calculated a NaN for the residual.");
+        }
         
-        // Check convergence
+        // Check convergence (Newton iteration)
         if((currentTime != deltaTime || (currentTime == deltaTime && iter != 0)) && 
            normf < convCriteria && norms < convCriteria) {
             cout << "    iter: " << std::to_string(iter) << " normf: " << std::to_string(normf) << " norms: " << std::to_string(norms) << endl;
             break;
         }
         
-        // Solve linear system
+        // sanity check
+        // cout << "[SolveSingleTimeStep] current solution before add increment: " << endl;
+        // for (int i = 0; i < currentSolution->GetDimension(); i++) {
+        //   cout << "  [" << static_cast<int>(i) << "] = " << (*currentSolution)[i] << endl;
+        // }
+
+        // clear before solve increment
+        increment->Clear();
+
+        // Solve linear system: get increment = LHS^-1 * RHS
         cvOneDGlobal::solver->Solve(*increment);
         currentSolution->Add(*increment);
-        
+
+        // sanity check
+        // cout << "[SolveSingleTimeStep] current solution after add increment: " << endl;
+        // for (int i = 0; i < currentSolution->GetDimension(); i++) {
+        //   cout << "  [" << static_cast<int>(i) << "] = " << (*currentSolution)[i] << endl;
+        // }
+
+        // If the area goes less than zero, it tells in which segment the error occurs.
+        int negArea=0;
+        if(jointList.size() != 0){
+          for (long i= 0; i< jointList[0]->GetGlobal1stLagNodeID();i+=2){
+            long elCount = 0;
+            int fileIter = 0;
+            //check if area <0 or =nan
+            if (currentSolution->Get(i) < 0.0 || (currentSolution->Get(i) != currentSolution->Get(i))){
+            negArea=1;
+              while (fileIter < model -> getNumberOfSegments()){
+                cvOneDSegment *curSeg = model -> getSegment(fileIter);
+                long numEls = curSeg -> getNumElements();
+                long startOut = elCount;
+                long finishOut = elCount + ((numEls+1)*2);
+                char *modelname;
+                char *segname;
+                if (startOut <= i && i <= finishOut) {
+                  modelname = model-> getModelName();
+                  segname = curSeg -> getSegmentName();
+                  std::string msg = "ERROR: The area of segment '" + std::string(segname) + "' is negative.";
+                  throw cvException(msg.c_str());
+                }
+                elCount += 2*(numEls+1);
+                fileIter++;
+              }
+            }
+          }
+        }
+
+        if(negArea==1) {
+          postprocess_Text();
+          assert(0);
+        }
+
         // Check for negative areas
         if(jointList.size() != 0) {
             currentSolution->CheckPositive(0, 2, jointList[0]->GetGlobal1stLagNodeID());
@@ -1699,6 +2119,14 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
         
         // Set boundary conditions
         mathModels[0]->SetBoundaryConditions();
+
+        // sanity check
+        // cout << "[SolveSingleTimeStep] current solution after apply BC: " << endl;
+        // for (int i = 0; i < currentSolution->GetDimension(); i++) {
+        //   cout << "  [" << static_cast<int>(i) << "] = " << (*currentSolution)[i] << endl;
+        // }
+
+
         tend_iter = clock();
         
         cout << "    iter: " << std::to_string(iter) << " normf: " << std::to_string(normf) << " norms: " << std::to_string(norms) << endl;
@@ -1710,7 +2138,30 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
         
         iter++;
     }
-    
+    // cout << "Exit Newton loop" << endl;
+
+    // Check mass balance (see if there is a loss)
+    // checkMass += mathModels[0]->CheckMassBalance() * deltaTime;
+    // cout << "  Time = " << currentTime << ", ";
+    // cout << "Mass = " << checkMass << ", ";
+    // cout << "Tot iters = " << std::to_string(iter) << endl;
+
+    // this part is for storing the solution
+    // Save solution if needed
+    // if(step % stepSize == 0){
+    //   sprintf( String2, "%ld", (unsigned long)step);
+    //   title = String1 + String2;
+    //   currentSolution->Rename(title.data());
+
+    //   double * tmp = currentSolution -> GetEntries();
+    //   int j;
+
+    //   for(j=0;j<currentSolution -> GetDimension(); j++){
+    //     TotalSolution[q][j] = tmp[j];
+    //   }
+    //   q++;
+    // }
+
     // Update previous solution for next time step
     *previousSolution = *currentSolution;
     
