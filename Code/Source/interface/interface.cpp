@@ -200,6 +200,15 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         interface->time_step_size_ = simulationOptions->stepSize;
         interface->max_step_ = simulationOptions->maxStep;
 
+        // Store coupling options in interface
+        interface->coupling_status_ = simulationOptions->couplingStatus;
+        interface->coupling_type_ = simulationOptions->couplingType;
+        interface->coupling_substeps_ = simulationOptions->couplingSubsteps;
+
+        cout << "[initialize] Coupling status: " << interface->coupling_status_ << endl;
+        cout << "[initialize] Coupling type: " << interface->coupling_type_ << endl;
+        cout << "[initialize] Coupling substeps: " << static_cast<int>(interface->coupling_substeps_) << endl;
+
         //// use functions inside runOneDSolver
         // Model checking
         const cvOneD::options& opts = *simulationOptions;
@@ -510,22 +519,9 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         }
 
         // Time loop initialization
-        interface->current_time_ = 0.0;
         interface->time_step_ = 0;
 
         cout << "[initialize_1d] 1D model is ready for time-stepping" << endl;
-      
-
-
-
-        cout << "TEST~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~" << endl;
-
-
-
-
-
-
-
 
     }else {
         cout << "[initialize_1d] WARNING: No simulation options found" << endl;
@@ -551,9 +547,20 @@ void set_external_step_size_1d(int problem_id, double external_step_size) {
     return;
   }
   
+  
   auto interface = it->second;
-  interface->external_step_size_ = external_step_size;
-  cout << "[set_external_step_size_1d] Step size: " << external_step_size << " s" << endl;
+
+  double oned_step_size = external_step_size/ (double(interface->coupling_substeps_));
+  // interface->coupling_substeps_ : number of sub steps that 1D solver will take within one external step. 
+  // For example, if coupling_substeps_ = 2, then 1D solver will take 2 steps within one external step
+  // so each 1D step size will be external_step_size/2.
+
+  interface->external_step_size_ = oned_step_size;//now 3D and 1D has same step size
+
+  cvOneDBFSolver::SetDeltaTime(oned_step_size);// set deltaTime in solver as oned_step_size
+
+
+  cout << "[set_external_step_size_1d] Step size: " << oned_step_size << " s" << endl;
 }
 
 /**
@@ -643,7 +650,8 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
 
   auto interface = it->second; // map에서 problem_id에 해당하는 interface 객체를 가져옴(second: value)
   error_code = 0;
-
+  auto oned_substeps = interface->coupling_substeps_; 
+  
   try {
     cout << "[run_1d_simulation_step_1d] ========================================" << endl;
     cout << "[run_1d_simulation_step_1d] Time step " 
@@ -654,11 +662,14 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
     // Update current time in solver
     cvOneDBFSolver::currentTime = current_time;
     
-    // Call the underlying 1D solver to compute one time step
-    // SolveSingleTimeStep returns a pointer to the solution vector
-    cvOneDFEAVector* solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time);
-    // 여기까지 GenerateSolution() 함수의 한 time step에 해당하는 부분을 가져왔음
-    cout << "Exit SolveSingleTimeStep" << endl;
+    cvOneDFEAVector* solution_ptr = nullptr;
+    for(int i = 0; i < oned_substeps; i++) {
+        // Call the underlying 1D solver to compute one time step
+        // SolveSingleTimeStep returns a pointer to the solution vector
+        solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time);
+        // 여기까지 GenerateSolution() 함수의 한 time step에 해당하는 부분을 가져왔음
+        current_time += interface->external_step_size_; // update current_time for next substep 
+    }
 
     // Make solution vector to transfer to 3D solver
     // format: [flow1][pressure1][flow2][pressure2]... for each nodes
@@ -670,12 +681,12 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
 
 
     // Update interface internal states
-    interface->time_step_++;
-    interface->current_time_ = current_time;
+    interface->time_step_++; // this is for 1D internal use only. substep is not inlcuded.
+    // this is same time_step with 3D solver
 
     // print solution as vtk file
     // TODO: 나중에 3D에서 얼마나 자주 저장하는지 보고 읽어서 같은 시간에 저장. run_1d_simulation_step_1d에 추가적인 파라메터로 읽어야할듯
-    if (interface->time_step_ % 100 == 0) {
+    if (interface->time_step_ % 1 == 0) {
         cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
         cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
     }

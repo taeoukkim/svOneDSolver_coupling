@@ -123,4 +123,9 @@ class OneDSolverInterface {
   std::string model_name_;
   double time_step_size_ = 0.0;
   int max_step_ = 0;
+
+  // Coupling options
+  std::string coupling_status_ = "OFF";     // "ON" or "OFF"
+  std::string coupling_type_;       // "DIR" or "NEU"
+  int coupling_substeps_ = 10;       // number of substeps
 };
