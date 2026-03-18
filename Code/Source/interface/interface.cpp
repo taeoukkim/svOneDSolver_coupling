@@ -668,17 +668,19 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
     }
     cvOneDBFSolver::ConvertSolutionToFlowPressure(solution_ptr, solution_vector);
 
+
+    // Update interface internal states
+    interface->time_step_++;
+    interface->current_time_ = current_time;
+
     // print solution as vtk file
     // TODO: 나중에 3D에서 얼마나 자주 저장하는지 보고 읽어서 같은 시간에 저장. run_1d_simulation_step_1d에 추가적인 파라메터로 읽어야할듯
-    if (interface->time_step_ == 0 || interface->time_step_ == 10) {
+    if (interface->time_step_ % 100 == 0) {
         cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
         cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
     }
     
 
-    // Update interface internal states
-    interface->time_step_++;
-    interface->current_time_ = current_time;
 
     // // Update coupled surface flows and pressures from solution
     // // (This depends on your coupled segment configuration)
