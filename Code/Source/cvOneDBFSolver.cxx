@@ -1345,7 +1345,7 @@ void cvOneDBFSolver::Solve(void){
 
 // Sub function for the 3D-1D coupling
 // first part of the Solve function
-void cvOneDBFSolver::Solve_initi(int& systemsize_){
+void cvOneDBFSolver::Solve_initi(int& systemsize_, char* coupling_types_){
   char errStr[256];
   // First check to make sure we've set a model pointer
   // Prior to solution attempt.
@@ -1361,7 +1361,12 @@ void cvOneDBFSolver::Solve_initi(int& systemsize_){
   // the subdomain and material information get passed.
   QuerryModelInformation();
 
-  DefineMthModels();
+  if(std::string(coupling_types_) == "DIR"){// Inflow only need for Dirichlet coupling
+      DefineMthModels();
+  }else if(std::string(coupling_types_) == "NEU"){
+      DefineMthModels_cpl_neu();
+  }
+  //DefineMthModels();
 
   CreateGlobalArrays();
 
@@ -1399,6 +1404,23 @@ void cvOneDBFSolver::DefineMthModels(){
   //specify inlet flow rate boundary condition with time
   segM->SetInflowRate(flowTime, flowRate, numFlowPts, flowTime[numFlowPts-1]);
   Period = flowTime[numFlowPts-1];
+
+  cvOneDMthBranchModel* branchM = new cvOneDMthBranchModel(subdomainList, jointList, outletList);
+  AddOneModel(segM);
+  AddOneModel(branchM);
+}
+
+void cvOneDBFSolver::DefineMthModels_cpl_neu(){
+  mathModels.clear();
+
+  cout << "Subdomain No. "<<subdomainList.size() << endl;
+  cout << "Joint No. "<< jointList.size() << endl;
+  cout << "Outlet No. "<< outletList.size() << endl;
+  cvOneDMthSegmentModel* segM = new cvOneDMthSegmentModel(subdomainList, jointList, outletList, quadPoints);
+
+  //specify inlet flow rate boundary condition with time
+  //segM->SetInflowRate(flowTime, flowRate, numFlowPts, flowTime[numFlowPts-1]);
+  //Period = flowTime[numFlowPts-1];
 
   cvOneDMthBranchModel* branchM = new cvOneDMthBranchModel(subdomainList, jointList, outletList);
   AddOneModel(segM);
@@ -1533,7 +1555,7 @@ void cvOneDBFSolver::QuerryModelInformation(void)
         subdomain->SetBoundCoronaryValues(time, p_lv,num);
         cout<<"CORONARY boundary condition"<<endl;
 
-      }else{
+      }else{ // COUPLED is also handled here
         subdomain -> SetBoundValue(boundV);
       }
 
@@ -1986,7 +2008,7 @@ void cvOneDBFSolver::ConvertSolutionToFlowPressure(
 }
 
 
-cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
+cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput, double interpolated_bc_val) {
     currentTime = currentTimeInput;
     
     clock_t tstart_iter;
@@ -2118,7 +2140,7 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput) {
         }
         
         // Set boundary conditions
-        mathModels[0]->SetBoundaryConditions();
+        mathModels[0]->SetBoundaryConditions_coupled(interpolated_bc_val);
 
         // sanity check
         // cout << "[SolveSingleTimeStep] current solution after apply BC: " << endl;

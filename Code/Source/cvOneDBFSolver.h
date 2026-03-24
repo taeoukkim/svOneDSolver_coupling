@@ -75,9 +75,9 @@ class cvOneDBFSolver{
     static void Solve(void);
 
     // for 3D-1D coupling
-    static void Solve_initi(int& systemsize_);
+    static void Solve_initi(int& systemsize_, char* coupling_types_);
     static void InitializeAllEquations();
-    static cvOneDFEAVector* SolveSingleTimeStep(double currentTimeInput);
+    static cvOneDFEAVector* SolveSingleTimeStep(double currentTimeInput, double interpolated_bc_val);
     static void ConvertSolutionToFlowPressure(cvOneDFEAVector* solution_ptr, 
                                           double* solution_vector);
     static void postprocess_VTK_XML3D_SingleTimeStep(int timeStep, 
@@ -130,6 +130,7 @@ class cvOneDBFSolver{
     static void GenerateSolution(void);
     //create MthSegmentModel and MthBranchModel if exists. Also specify inflow profile
     static void DefineMthModels(void);
+    static void DefineMthModels_cpl_neu(void);
     static void AddOneModel(cvOneDMthModelBase* model);
 
     static bool wasSet;

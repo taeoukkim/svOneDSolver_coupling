@@ -626,7 +626,7 @@ void cvOneDMthSegmentModel::FormElement(long element,
 			}
 
 			if(bound==BoundCondTypeScope::NOBOUND||bound==BoundCondTypeScope::PRESSURE
-					||bound==BoundCondTypeScope::FLOW){
+					||bound==BoundCondTypeScope::FLOW||bound==BoundCondTypeScope::COUPLED){
 				//Outlet flux term (at z=z_outlet) which is the linearized F-KU
 				if (element == (sub->GetNumberOfElements())-1){
 					double z = sub->GetOutletZ();
@@ -674,7 +674,7 @@ void cvOneDMthSegmentModel::FormElement(long element,
 			}// end inlet flux
 
 			if(bound==BoundCondTypeScope::NOBOUND||bound==BoundCondTypeScope::PRESSURE
-					||bound==BoundCondTypeScope::FLOW){
+					||bound==BoundCondTypeScope::FLOW||bound==BoundCondTypeScope::COUPLED){
 				//If no outlet BC or Dirichlet outlet BC, compute the Outlet full flux term (at z=z_outlet) which is the linearized F-KU IV 02-03-03
 				if (element == (sub->GetNumberOfElements())-1){
 					double z = sub->GetOutletZ();//checked IV 02-03-03

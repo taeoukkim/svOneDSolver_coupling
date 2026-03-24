@@ -156,7 +156,7 @@ extern "C" void get_coupled_solution_1d(int problem_id, int num_surfaces,
                                         double* flows_out,
                                         double* pressures_out);
 
-extern "C" void run_1d_simulation_step_1d(int problem_id, double current_time,
+extern "C" void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
                                           double* solution_vector, int& error_code);
 
 extern "C" void get_resistance_matrix_1d(int problem_id, int num_surfaces,
@@ -414,30 +414,43 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
             curveValue = nullptr;
         }// until this part of the code is the part of the code of createAndUnModel before SOLVE MODEL
 
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // 이건 1D 모델에서 inlet boundary condition을 설정하는 부분
-        // 커플링이 Dirichlet인 경우 여전히 필요
-        // 커플링이 Neumann인 경우에는 flow 값을 각 시간에서 풀때 3D 솔버에서 받아와서 업데이트 해주는 방식으로 구현할 예정
-        // 일딴 지금 계발에선 항상 커플링이 Dirichlet인 경우로 가정
+
         string inletCurveName = opts.inletDataTableName;
-        int inletCurveIDX = getDataTableIDFromStringKey(inletCurveName);
-        int inletCurveTotals = cvOneDGlobal::gDataTables[inletCurveIDX]->getSize();
-        double* inletCurveTime = new double[inletCurveTotals];
-        double* inletCurveValue = new double[inletCurveTotals];
-        if(std::string(coupling_types) == "DIR"){
-            // Dirichlet coupling인 경우 inlet boundary condition으로 사용할 데이터를 미리 저장해 놓는 과정
-            printf("Dirichlet coupling. Get inlet flow data ... \n");
-            for(int loopB = 0; loopB < inletCurveTotals; loopB++) {
-                inletCurveTime[loopB] = cvOneDGlobal::gDataTables[inletCurveIDX]->getTime(loopB);
-                inletCurveValue[loopB] = cvOneDGlobal::gDataTables[inletCurveIDX]->getValues(loopB);
+        int inletCurveTotals;
+        double* inletCurveTime;
+        double* inletCurveValue;
+
+        if (upper_string(inletCurveName) != "NONE") { // Dirichlet coupling
+
+            int inletCurveIDX = getDataTableIDFromStringKey(inletCurveName);
+            inletCurveTotals = cvOneDGlobal::gDataTables[inletCurveIDX]->getSize();
+
+            inletCurveTime = new double[inletCurveTotals];
+            inletCurveValue = new double[inletCurveTotals];
+
+            if (std::string(coupling_types) == "DIR") {
+                printf("Dirichlet coupling. Get inlet flow data\n");
+
+                for (int loopB = 0; loopB < inletCurveTotals; loopB++) {
+                    inletCurveTime[loopB] =
+                        cvOneDGlobal::gDataTables[inletCurveIDX]->getTime(loopB);
+                    inletCurveValue[loopB] =
+                        cvOneDGlobal::gDataTables[inletCurveIDX]->getValues(loopB);
+                }
             }
+        } else { // Neumann coupling
+            inletCurveTotals = 1;
+            inletCurveTime = new double[1];
+            inletCurveValue = new double[1];
+
+            inletCurveTime[0] = 0.0;
+            inletCurveValue[0] = 0.0;
         }
-        // coupling code에서 반드시 필요한 부분임. if문만 나중에 다듬기
-        ////////////////////////////////////////////////////////////////////////////////////////////
+
 
         // 여기부터는 SolveModel중 초기화에 해당되는 부분을 추가
         int solveError = CV_OK;
-        // inlet boundary type이 pts.boundaryType에 저장되어있는데 (.in 파일에서 SOLVEROPTIONS에서 읽은것)
+        // inlet boundary type이 opts.boundaryType에 저장되어있는데 (.in 파일에서 SOLVEROPTIONS에서 읽은것)
         // 아래 코드는 SolveModel에서 그대로 가지고 온건데 왜 여러 다른 boundary type이 있는지 아직 잘 모르겠음.
         // TODO: 나중에 Neumann coupling의 경우 이 inlet BC이 coupled 같은게 될것이므로 수정 필요
         // 일딴은 그냥 넣어보자
@@ -471,6 +484,9 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         }else if(!strcmp( boundType_tmp, "CORONARY")){
             boundT = BoundCondTypeScope::CORONARY;
             printf("Inlet Condition Type: CORONARY\n");
+        }else if(!strcmp(boundType_tmp, "COUPLED")){
+            boundT = BoundCondTypeScope::COUPLED;
+            printf("Inlet Condition Type: COUPLED\n");
         }else{
             solveError = CV_ERROR;
         }
@@ -489,8 +505,8 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         cvOneDBFSolver::SetMaxStep(opts.maxStep);
         cvOneDBFSolver::SetQuadPoints(opts.quadPoints);
         cvOneDBFSolver::SetInletBCType(boundT);
-        if(std::string(coupling_types) == "DIR"){
-            cvOneDBFSolver::DefineInletFlow(inletCurveTime, inletCurveValue, inletCurveTotals); // this need to be chaged it only happen for Dir
+        if(std::string(coupling_types) == "DIR"){// Inflow only need for Dirichlet coupling
+            cvOneDBFSolver::DefineInletFlow(inletCurveTime, inletCurveValue, inletCurveTotals);
         }
         cvOneDBFSolver::SetConvergenceCriteria(opts.convergenceTolerance);
 
@@ -498,13 +514,10 @@ void initialize_1d(const char* input_file, int& problem_id, int& systemSize,
         // 여기까지가 SolveModel에서 Solve() 함수 이전까지의 부분
 
         // 여기부터는 Solve() 함수 부분 중에서도 GenerateSolution 이전부분
-        cvOneDBFSolver::Solve_initi(systemSize); // TODO: 지금 이 안에도 커플링위해서 바꿔야하는 함수들 많음
+        cvOneDBFSolver::Solve_initi(systemSize, coupling_types); // TODO: 지금 이 안에도 커플링위해서 바꿔야하는 함수들 많음
         // output: systemSize, which is the total number of unknowns in the system. #NODE x 2 (flow&area)
         // cout << "system size: " << static_cast<int>(systemSize) << endl; // total number of unknows in the system. #NODE x 2 (flow&area) 
 
-
-
-        // TODO: 이제 generateSolution 에 들어왔음.
         // time loop 시작 전에 필요한 초기화 작업들
         // 여기부터는 Solve() 함수 부분 중에서도 GenerateSolution 이전부분
         cout << "[initialize_1d] Model initialized, preparing for time-stepping..." << endl;
@@ -634,11 +647,14 @@ void get_coupled_solution_1d(int problem_id, int num_surfaces,
  *
  * @param problem_id The ID used to identify the 1D problem.
  * @param current_time Current simulation time (seconds)
+ * @param save_time Save 1D results every save_time 3D time steps
+ * @param coupling_types Type of coupling for each surface ("DIR" or "NEU")
+ * @param params bc data from 3D solver for interpolation [2, t1, t2, value1, value2]
  * @param solution_vector Output vector containing pressure and flow values
  *                       Size: 2*system_size (pressure[0..system_size-1], flow[system_size..2*system_size-1])
  * @param error_code Output error code (0 = success, <0 = error)
  */
-void run_1d_simulation_step_1d(int problem_id, double current_time, 
+void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
                                 double* solution_vector, int& error_code) {
   auto it = OneDSolverInterface::interface_list_.find(problem_id); //problem_id에 해당되는 interface 객체를 찾음
   if (it == OneDSolverInterface::interface_list_.end()) {
@@ -663,12 +679,33 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
     cvOneDBFSolver::currentTime = current_time;
     
     cvOneDFEAVector* solution_ptr = nullptr;
+    double t1 = params[1];
+    double t2 = params[2];
+    double val1 = params[3];
+    double val2 = params[4];
+    double alpha = 0.0;
+    double interpolated_value = 0.0;
+
     for(int i = 0; i < oned_substeps; i++) {
+        // get coupled data from 3D solver and do interpolation for current time
+        // this is same for Dir or Neu coupling
+        if (current_time <= t1) {
+            interpolated_value = val1;
+        } else if (current_time >= t2) {
+            interpolated_value = val2;
+        } else {
+            alpha = (current_time - t1) / (t2 - t1);
+            interpolated_value = val1 + alpha * (val2 - val1);
+        }
+        // cout << "[run_1d_simulation_step_1d] Substep " << (i+1) << "/" << static_cast<int>(oned_substeps) 
+        //      << ", interpolated_value = " << interpolated_value << endl;
+
         // Call the underlying 1D solver to compute one time step
         // SolveSingleTimeStep returns a pointer to the solution vector
-        solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time);
+        solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time, interpolated_value);
         // 여기까지 GenerateSolution() 함수의 한 time step에 해당하는 부분을 가져왔음
-        current_time += interface->external_step_size_; // update current_time for next substep 
+        current_time += interface->external_step_size_; // update current_time for next 1D substep
+        // external step size is 1D solver time step size 
     }
 
     // Make solution vector to transfer to 3D solver
@@ -686,7 +723,7 @@ void run_1d_simulation_step_1d(int problem_id, double current_time,
 
     // print solution as vtk file
     // TODO: 나중에 3D에서 얼마나 자주 저장하는지 보고 읽어서 같은 시간에 저장. run_1d_simulation_step_1d에 추가적인 파라메터로 읽어야할듯
-    if (interface->time_step_ % 1 == 0) {
+    if (interface->time_step_ % save_time == 0) {
         cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
         cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
     }
