@@ -77,11 +77,15 @@ class cvOneDBFSolver{
     // for 3D-1D coupling
     static void Solve_initi(int& systemsize_, char* coupling_types_);
     static void InitializeAllEquations();
+    static void InitializeSolutionFromVector(const double* solution_data, int size);
+    static void GetCurrentSolution(double* solution_data, int size);
     static cvOneDFEAVector* SolveSingleTimeStep(double currentTimeInput, double interpolated_bc_val);
     static void ConvertSolutionToFlowPressure(cvOneDFEAVector* solution_ptr, 
                                           double* solution_vector);
     static void postprocess_VTK_XML3D_SingleTimeStep(int timeStep, 
                                                     cvOneDFEAVector* solution_ptr);
+    static void extractCplBC(double* solution_data, double& CplValue, char* coupling_types);
+    static void extractCplDOF(int& cpldof, char* coupling_types);
 
     // Get the solution;
     static double GetSolution(int i, int j){return TotalSolution[i][j];}//IV 082103

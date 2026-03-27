@@ -51,66 +51,6 @@ class OneDSolverInterface {
   double external_step_size_ = 0.001;
 
   /**
-   * @brief Number of 1D segments in the network
-   */
-  int num_segments_ = 0;
-
-  /**
-   * @brief Number of nodes in the network
-   */
-  int num_nodes_ = 0;
-
-  /**
-   * @brief Number of surfaces coupled with 3D
-   */
-  int num_coupled_surfaces_ = 0;
-
-  /**
-   * @brief Names of coupled segments
-   */
-  std::vector<std::string> coupled_segment_names_;
-
-  /**
-   * @brief Type of coupling for each surface ("DIR" or "NEU")
-   */
-  std::vector<std::string> coupling_types_;
-
-  /**
-   * @brief In/out signs for coupled surfaces
-   */
-  std::vector<double> in_out_signs_;
-
-  /**
-   * @brief IDs of coupled segments
-   */
-  std::vector<int> coupled_segment_ids_;
-
-  /**
-   * @brief Current flows at coupled surfaces (mL/s)
-   */
-  std::vector<double> current_flows_;
-
-  /**
-   * @brief Previous flows at coupled surfaces (mL/s)
-   */
-  std::vector<double> previous_flows_;
-
-  /**
-   * @brief Current pressures at coupled surfaces (mmHg)
-   */
-  std::vector<double> current_pressures_;
-
-  /**
-   * @brief Previous pressures at coupled surfaces (mmHg)
-   */
-  std::vector<double> previous_pressures_;
-
-  /**
-   * @brief Resistance matrix (sensitivity) dP/dQ for coupling
-   */
-  std::vector<std::vector<double>> resistance_matrix_;
-
-  /**
    * @brief Current time step
    */
   int time_step_ = 0;

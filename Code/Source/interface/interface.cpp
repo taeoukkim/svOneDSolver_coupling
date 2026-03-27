@@ -148,21 +148,13 @@ extern "C" void initialize_1d(const char* input_file, int& problem_id,  int& sys
 extern "C" void set_external_step_size_1d(int problem_id,
                                           double external_step_size);
 
-extern "C" void update_coupled_bc_1d(int problem_id, int num_surfaces,
-                                     double* input_values,
-                                     const char* coupling_type);
+extern "C" void return_1d_solution(int problem_id, double* solution_1d, int solution_size);
 
-extern "C" void get_coupled_solution_1d(int problem_id, int num_surfaces,
-                                        double* flows_out,
-                                        double* pressures_out);
+extern "C" void update_1d_solution(int problem_id, const double* previous_solution_data, int solution_size);
 
 extern "C" void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
-                                          double* solution_vector, int& error_code);
-
-extern "C" void get_resistance_matrix_1d(int problem_id, int num_surfaces,
-                                         double** resistance_matrix);
-
-extern "C" void cleanup_1d(int problem_id);
+                                          double* solution_vector, double& cplBCvalue, int& error_code);
+extern "C" void extract_coupled_dof(int problem_id, int& coupled_dof, char* coupling_types);
 
 /**
  * @brief Initialize the 1D solver interface for 3D-1D coupling.
@@ -577,66 +569,72 @@ void set_external_step_size_1d(int problem_id, double external_step_size) {
 }
 
 /**
- * @brief Update boundary conditions for coupled surfaces.
+ * @brief copy current 1D solution from 1D solver to 3D solver
  *
  * @param problem_id The ID used to identify the 1D problem.
- * @param num_surfaces Number of coupled surfaces
- * @param input_values Array of input values (pressures or flows)
- * @param coupling_type Type of coupling ("DIR" for pressure or "NEU" for flow)
+ * @param solution_1d 1D solution of 3D solver
  */
-void update_coupled_bc_1d(int problem_id, int num_surfaces,
-                          double* input_values,
-                          const char* coupling_type) {
-  auto it = OneDSolverInterface::interface_list_.find(problem_id);
-  if (it == OneDSolverInterface::interface_list_.end()) {
-    cerr << "Error: problem_id " << (int)problem_id << " not found" << endl;
-    return;
-  }
-
-  auto interface = it->second;
-  std::string coup_type(coupling_type);
-
-  cout << "[update_coupled_bc_1d] Coupling type: " << coup_type << endl;
-
-  for (int i = 0; i < num_surfaces; i++) {
-    if (coup_type == "DIR") {
-      interface->current_pressures_[i] = input_values[i];
-      cout << "  Surface " << (int)i << " (DIR): P = " << input_values[i] << " mmHg" << endl;
-    } else if (coup_type == "NEU") {
-      interface->current_flows_[i] = input_values[i];
-      cout << "  Surface " << (int)i << " (NEU): Q = " << input_values[i] << " mL/s" << endl;
+void return_1d_solution(int problem_id, double* solution_1d, int solution_size){
+    auto it = OneDSolverInterface::interface_list_.find(problem_id);
+    if (it == OneDSolverInterface::interface_list_.end()) {
+        cerr << "[return_1d_solution] Error: problem_id " 
+             << static_cast<int>(problem_id) << " not found" << endl;
+        return;
     }
-  }
+
+    auto interface = it->second;
+    
+    try {
+        cout << "[return_1d_solution] ========================================" << endl;
+        cout << "[return_1d_solution] Extracting solution for problem_id: " 
+             << static_cast<int>(problem_id) << endl;
+        
+        // cvOneDBFSolver의 getter 함수 호출
+        cvOneDBFSolver::GetCurrentSolution(solution_1d, solution_size);
+        
+        cout << "[return_1d_solution] Solution extracted successfully" << endl;
+        
+    } catch (const std::exception& e) {
+        cerr << "[return_1d_solution] Exception caught: " << e.what() << endl;
+        throw;
+    }
 }
 
 /**
- * @brief Get the current solution (flows and pressures) at coupled surfaces.
+ * @brief Reset the 1D solver solution vectors for coupling with 3D solver.
  *
- * @param problem_id The ID used to identify the 1D problem.
- * @param num_surfaces Number of coupled surfaces
- * @param flows_out Output array for flows at coupled surfaces
- * @param pressures_out Output array for pressures at coupled surfaces
+ * This function initializes previousSolution and currentSolution with values from
+ * the previous time step, which is required when the 1D solver is called multiple times
+ * within a 3D Newton loop.
+ *
+ * @param problem_id The ID of the 1D problem
+ * @param previous_solution_data Array containing the solution from previous time step
+ * @param solution_size The size of the solution array
  */
-void get_coupled_solution_1d(int problem_id, int num_surfaces,
-                             double* flows_out,
-                             double* pressures_out) {
-  auto it = OneDSolverInterface::interface_list_.find(problem_id);
-  if (it == OneDSolverInterface::interface_list_.end()) {
-    cerr << "Error: problem_id " << (int)problem_id << " not found" << endl;
-    return;
-  }
+void update_1d_solution(int problem_id, const double* previous_solution_data, int solution_size) {
+    auto it = OneDSolverInterface::interface_list_.find(problem_id);
+    if (it == OneDSolverInterface::interface_list_.end()) {
+        cerr << "[reset_1d_solution] Error: problem_id " 
+             << static_cast<int>(problem_id) << " not found" << endl;
+        return;
+    }
 
-  auto interface = it->second;
-
-  for (int i = 0; i < num_surfaces; i++) {
-    flows_out[i] = interface->current_flows_[i];
-    pressures_out[i] = interface->current_pressures_[i];
+    auto interface = it->second;
     
-    cout << "[get_coupled_solution_1d] Surface " << (int)i 
-         << ": Q = " << flows_out[i] 
-         << " mL/s, P = " << pressures_out[i] << " mmHg" << endl;
-  }
+    try {
+        cout << "[update_1d_solution] ========================================" << endl;
+        
+        // call function from cvOneDBFSolver 
+        cvOneDBFSolver::InitializeSolutionFromVector(previous_solution_data, solution_size);
+        
+        cout << "[update_1d_solution] Solution vectors reset successfully" << endl;
+        
+    } catch (const std::exception& e) {
+        cerr << "[update_1d_solution] Exception caught: " << e.what() << endl;
+        throw;
+    }
 }
+
 
 /**
  * @brief Run one time step of the 1D simulation.
@@ -655,7 +653,7 @@ void get_coupled_solution_1d(int problem_id, int num_surfaces,
  * @param error_code Output error code (0 = success, <0 = error)
  */
 void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
-                                double* solution_vector, int& error_code) {
+                                double* solution_vector, double& cplBCvalue, int& error_code) {
   auto it = OneDSolverInterface::interface_list_.find(problem_id); //problem_id에 해당되는 interface 객체를 찾음
   if (it == OneDSolverInterface::interface_list_.end()) {
     cerr << "[run_1d_simulation_step_1d] Error: problem_id " 
@@ -678,6 +676,7 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
     // Update current time in solver
     cvOneDBFSolver::currentTime = current_time;
     
+    // now params[0] is always 2. not used here
     cvOneDFEAVector* solution_ptr = nullptr;
     double t1 = params[1];
     double t2 = params[2];
@@ -703,18 +702,38 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
         // Call the underlying 1D solver to compute one time step
         // SolveSingleTimeStep returns a pointer to the solution vector
         solution_ptr = cvOneDBFSolver::SolveSingleTimeStep(current_time, interpolated_value);
-        // 여기까지 GenerateSolution() 함수의 한 time step에 해당하는 부분을 가져왔음
+        
         current_time += interface->external_step_size_; // update current_time for next 1D substep
         // external step size is 1D solver time step size 
     }
 
-    // Make solution vector to transfer to 3D solver
-    // format: [flow1][pressure1][flow2][pressure2]... for each nodes
-    // currnet solution_ptr: [area1][flow1][area2][flow2]... for each nodes
-    if (solution_ptr == nullptr) { // check if the solver returned a valid solution
+
+    // Check if the solver returned a valid solution
+    if (solution_ptr == nullptr) {
       throw std::runtime_error("SolveSingleTimeStep returned null pointer");
     }
-    cvOneDBFSolver::ConvertSolutionToFlowPressure(solution_ptr, solution_vector);
+
+    // Step 1: Copy solution_ptr directly to solution_vector [area1][flow1][area2][flow2]...
+    int solution_size = solution_ptr->GetDimension();
+    double* solution_data_tmp = solution_ptr->GetEntries();
+    for(int i = 0; i < solution_size; i++) {
+        solution_vector[i] = solution_data_tmp[i];
+    }
+
+    // Step 2: Convert to flow and pressure format separately (for internal use or debugging)
+    // Create a separate vector for converted solution
+    // Make solution vector to transfer to 3D solver
+    // converted_solution format: [flow1][pressure1][flow2][pressure2]... for each nodes
+    // currnet solution_ptr: [area1][flow1][area2][flow2]... for each nodes
+    double* converted_solution = new double[solution_size];
+    cvOneDBFSolver::ConvertSolutionToFlowPressure(solution_ptr, converted_solution);
+    // converted_solution now contains [flow1][pressure1][flow2][pressure2]...
+    // You can use this for other purposes if needed
+
+    // extract coupled BC value for 3D solver from converted_solution
+    cvOneDBFSolver::extractCplBC(converted_solution, cplBCvalue, coupling_types);
+
+    delete[] converted_solution;
 
 
     // Update interface internal states
@@ -722,22 +741,12 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
     // this is same time_step with 3D solver
 
     // print solution as vtk file
-    // TODO: 나중에 3D에서 얼마나 자주 저장하는지 보고 읽어서 같은 시간에 저장. run_1d_simulation_step_1d에 추가적인 파라메터로 읽어야할듯
     if (interface->time_step_ % save_time == 0) {
         cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
         cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
     }
     
 
-
-    // // Update coupled surface flows and pressures from solution
-    // // (This depends on your coupled segment configuration)
-    // for (size_t i = 0; i < interface->coupled_segment_ids_.size(); i++) {
-    //   int seg_id = interface->coupled_segment_ids_[i];
-    //   // Extract flow and pressure from coupled segment
-    //   // This requires mapping segment ID to node indices
-    //   // TODO: Implement segment-to-node mapping based on your model structure
-    // }
 
     cout << "[run_1d_simulation_step_1d] Time step completed" << endl;
 
@@ -747,63 +756,27 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
   }
 }
 
-
-
-/**
- * @brief Get the resistance matrix (sensitivity) dP/dQ for coupling.
- *
- * @param problem_id The ID used to identify the 1D problem.
- * @param num_surfaces Number of coupled surfaces
- * @param resistance_matrix Output resistance matrix (num_surfaces x num_surfaces)
- */
-void get_resistance_matrix_1d(int problem_id, int num_surfaces,
-                              double** resistance_matrix) {
-  auto it = OneDSolverInterface::interface_list_.find(problem_id);
-  if (it == OneDSolverInterface::interface_list_.end()) {
-    cerr << "Error: problem_id " << (int)problem_id << " not found" << endl;
-    return;
-  }
-
-  auto interface = it->second;
-
-  const double perturbation = 1.0e-7;
-
-  // Compute finite difference sensitivity: dP/dQ
-  for (int j = 0; j < num_surfaces; j++) {
-    auto saved_flows = interface->current_flows_;
-    interface->current_flows_[j] += perturbation;
-
-    for (int i = 0; i < num_surfaces; i++) {
-      double dP = interface->current_pressures_[i] - 
-                  interface->previous_pressures_[i];
-      double dQ = perturbation;
-      resistance_matrix[i][j] = (dQ != 0.0) ? dP / dQ : 0.0;
+void extract_coupled_dof(int problem_id, int& coupled_dof, char* coupling_types){
+    auto it = OneDSolverInterface::interface_list_.find(problem_id);
+    if (it == OneDSolverInterface::interface_list_.end()) {
+        cerr << "[extract_coupled_dof] Error: problem_id " 
+             << static_cast<int>(problem_id) << " not found" << endl;
+        return;
     }
 
-    interface->current_flows_ = saved_flows;
-  }
-
-  cout << "[get_resistance_matrix_1d] Resistance matrix computed" << endl;
-}
-
-/**
- * @brief Cleanup and destroy the 1D interface.
- *
- * @param problem_id The ID used to identify the 1D problem.
- */
-void cleanup_1d(int problem_id) {
-  auto it = OneDSolverInterface::interface_list_.find(problem_id);
-  if (it == OneDSolverInterface::interface_list_.end()) {
-    cerr << "Error: problem_id " << (int)problem_id << " not found" << endl;
-    return;
-  }
-
-  auto interface = it->second;
-  
-  cout << "[cleanup_1d] Cleaning up problem_id " << (int)problem_id << endl;
-  
-  delete interface;
-  OneDSolverInterface::interface_list_.erase(it);
-  
-  cout << "[cleanup_1d] Cleanup completed" << endl;
+    auto interface = it->second;
+    
+    try {
+        cout << "[extract_coupled_dof] ========================================" << endl;
+        
+        // call function from cvOneDBFSolver 
+        cvOneDBFSolver::extractCplDOF(coupled_dof, coupling_types);
+        
+        cout << "[extract_coupled_dof] Coupled DOF extracted successfully" << endl;
+        
+    } catch (const std::exception& e) {
+        cerr << "[extract_coupled_dof] Exception caught: " << e.what() << endl;
+        throw;
+    }
+    
 }

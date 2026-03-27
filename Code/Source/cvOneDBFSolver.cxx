@@ -1361,7 +1361,7 @@ void cvOneDBFSolver::Solve_initi(int& systemsize_, char* coupling_types_){
   // the subdomain and material information get passed.
   QuerryModelInformation();
 
-  if(std::string(coupling_types_) == "DIR"){// Inflow only need for Dirichlet coupling
+  if(std::string(coupling_types_) == "DIR"){
       DefineMthModels();
   }else if(std::string(coupling_types_) == "NEU"){
       DefineMthModels_cpl_neu();
@@ -2007,6 +2007,54 @@ void cvOneDBFSolver::ConvertSolutionToFlowPressure(
   cout << "Solution conversion completed." << endl;
 }
 
+// ===================================================================
+// GET CURRENT SOLUTION FROM CVONEDFEAVE CTOR
+// ===================================================================
+void cvOneDBFSolver::GetCurrentSolution(double* solution_data, int size) {
+    if(solution_data == NULL) {
+        throw cvException("ERROR: solution_data is NULL in GetCurrentSolution");
+    }
+    
+    if(currentSolution == NULL) {
+        throw cvException("ERROR: currentSolution is not initialized in GetCurrentSolution");
+    }
+    
+    // check size
+    if(size != currentSolution->GetDimension()) {
+        throw cvException("ERROR: Solution size mismatch in GetCurrentSolution");
+    }
+    
+    // copy currentSolution to solution_data
+    double* current_data = currentSolution->GetEntries();
+    for(int i = 0; i < size; i++) {
+        solution_data[i] = current_data[i];
+    }
+    
+    cout << "[GetCurrentSolution] Current solution extracted successfully" << endl;
+}
+
+
+void cvOneDBFSolver::InitializeSolutionFromVector(const double* solution_data, int size) {
+    if(solution_data == NULL) {
+        throw cvException("ERROR: solution_data is NULL in InitializeSolutionFromVector");
+    }
+    
+    if(previousSolution == NULL || currentSolution == NULL) {
+        throw cvException("ERROR: previousSolution or currentSolution is not initialized. Call CreateGlobalArrays first.");
+    }
+    
+    if(size != previousSolution->GetDimension()) {
+        throw cvException("ERROR: Solution size mismatch in InitializeSolutionFromVector");
+    }
+    
+    for(int i = 0; i < size; i++) {
+        (*previousSolution)[i] = solution_data[i];
+        (*currentSolution)[i] = solution_data[i];
+    }
+    
+    cout << "[InitializeSolutionFromVector] Solution vectors reset successfully" << endl;
+}
+
 
 cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput, double interpolated_bc_val) {
     currentTime = currentTimeInput;
@@ -2162,30 +2210,17 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput, do
     }
     // cout << "Exit Newton loop" << endl;
 
-    // Check mass balance (see if there is a loss)
-    // checkMass += mathModels[0]->CheckMassBalance() * deltaTime;
-    // cout << "  Time = " << currentTime << ", ";
-    // cout << "Mass = " << checkMass << ", ";
-    // cout << "Tot iters = " << std::to_string(iter) << endl;
-
-    // this part is for storing the solution
-    // Save solution if needed
-    // if(step % stepSize == 0){
-    //   sprintf( String2, "%ld", (unsigned long)step);
-    //   title = String1 + String2;
-    //   currentSolution->Rename(title.data());
-
-    //   double * tmp = currentSolution -> GetEntries();
-    //   int j;
-
-    //   for(j=0;j<currentSolution -> GetDimension(); j++){
-    //     TotalSolution[q][j] = tmp[j];
-    //   }
-    //   q++;
-    // }
-
     // Update previous solution for next time step
     *previousSolution = *currentSolution;
     
     return currentSolution;
+}
+
+void cvOneDBFSolver::extractCplBC(double* solution_data, double& CplValue, char* coupling_types){
+  //
+  mathModels[0]->extractCplBC_model(solution_data, CplValue, coupling_types);
+}
+
+void cvOneDBFSolver::extractCplDOF(int& cpldof, char* coupling_types){
+  mathModels[0]->extractCpldof(cpldof, coupling_types);
 }

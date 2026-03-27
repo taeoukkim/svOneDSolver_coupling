@@ -67,6 +67,8 @@ class cvOneDMthModelBase{
     virtual void FormNewton(cvOneDFEAMatrix* lhsMatrix, cvOneDFEAVector* rhsVector) = 0;
     virtual void SetBoundaryConditions();
     virtual void SetBoundaryConditions_coupled(double interpolated_value); // for 3D-1D coupling
+    virtual void extractCplBC_model(double* solution_data, double& CplValue, char* coupling_types); // for 3D-1D coupling
+    virtual void extractCpldof(int& Cpldof, char* coupling_types); // for 3D-1D coupling
     virtual double CheckMassBalance();
     virtual void ApplyBoundaryConditions();
     virtual void GetNodalEquationNumbers( long node, long* eqNumbers, long ith);

@@ -271,6 +271,67 @@ void cvOneDMthModelBase::SetBoundaryConditions_coupled(double interpolated_value
   }// end for loop
 }
 
+void cvOneDMthModelBase::extractCplBC_model(double* solution_data, double& CplValue, char* coupling_types){
+  // solution_data format: [flow1][pressure1][flow2][pressure2]... for each nodes
+  long eqNumbers[2];  // two degress of freedom per node
+  cvOneDSubdomain* sub;
+
+  if(std::string(coupling_types) == "NEU"){
+    
+    if(cvOneDBFSolver::inletBCtype == BoundCondTypeScope::COUPLED) {
+      GetNodalEquationNumbers( 0, eqNumbers, 0);
+      CplValue = solution_data[eqNumbers[1]]; // pressure dof for inlet node
+
+      //cout << "CplValue: " << CplValue << endl;
+
+    }else{
+      cout << "[ExtractCoupledBCValue] WARNING: NEU coupling but inlet BC is not COUPLED" << endl;
+    }
+
+  }else if(std::string(coupling_types) == "DIR"){
+    for(auto it = outletList.begin(); it != outletList.end(); it++) {
+        GetNodalEquationNumbers(subdomainList[*it]->GetNumberOfNodes() - 1, eqNumbers, *it);
+        sub = subdomainList[*it];
+        // Check if outlet is coupled
+        if(sub->GetBoundCondition() == BoundCondTypeScope::COUPLED) {
+            // Extract flow from solution vector
+            CplValue = solution_data[eqNumbers[0]]; // flow dof for outlet node
+            break;  // Only extract from first coupled outlet
+        }
+    }
+  }
+}
+
+void cvOneDMthModelBase::extractCpldof(int& Cpldof, char* coupling_types){
+  // solution_data format: [flow1][pressure1][flow2][pressure2]... for each nodes
+  long eqNumbers[2];  // two degress of freedom per node
+  cvOneDSubdomain* sub;
+
+  if(std::string(coupling_types) == "NEU"){
+    
+    if(cvOneDBFSolver::inletBCtype == BoundCondTypeScope::COUPLED) {
+      GetNodalEquationNumbers( 0, eqNumbers, 0);
+      Cpldof = eqNumbers[1]; // pressure dof for inlet node
+
+      //cout << "CplValue: " << CplValue << endl;
+
+    }else{
+      cout << "[ExtractCoupledBCValue] WARNING: NEU coupling but inlet BC is not COUPLED" << endl;
+    }
+
+  }else if(std::string(coupling_types) == "DIR"){
+    for(auto it = outletList.begin(); it != outletList.end(); it++) {
+        GetNodalEquationNumbers(subdomainList[*it]->GetNumberOfNodes() - 1, eqNumbers, *it);
+        sub = subdomainList[*it];
+        // Check if outlet is coupled
+        if(sub->GetBoundCondition() == BoundCondTypeScope::COUPLED) {
+            // Extract flow from solution vector
+            Cpldof = eqNumbers[0]; // flow dof for outlet node
+            break;  // Only extract from first coupled outlet
+        }
+    }
+  }
+}
 
 // Eval Mass Balance
 double cvOneDMthModelBase::CheckMassBalance(){
