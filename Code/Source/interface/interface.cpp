@@ -153,7 +153,7 @@ extern "C" void return_1d_solution(int problem_id, double* solution_1d, int solu
 extern "C" void update_1d_solution(int problem_id, const double* previous_solution_data, int solution_size);
 
 extern "C" void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
-                                          double* solution_vector, double& cplBCvalue, int& error_code);
+                                          double* solution_vector, double& cplBCvalue, char* last_flag, int& error_code);
 extern "C" void extract_coupled_dof(int problem_id, int& coupled_dof, char* coupling_types);
 
 /**
@@ -653,7 +653,7 @@ void update_1d_solution(int problem_id, const double* previous_solution_data, in
  * @param error_code Output error code (0 = success, <0 = error)
  */
 void run_1d_simulation_step_1d(int problem_id, double current_time, int save_time, char* coupling_types, double* params,
-                                double* solution_vector, double& cplBCvalue, int& error_code) {
+                                double* solution_vector, double& cplBCvalue, char* last_flag,int& error_code) {
   auto it = OneDSolverInterface::interface_list_.find(problem_id); //problem_id에 해당되는 interface 객체를 찾음
   if (it == OneDSolverInterface::interface_list_.end()) {
     cerr << "[run_1d_simulation_step_1d] Error: problem_id " 
@@ -736,14 +736,18 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
     delete[] converted_solution;
 
 
-    // Update interface internal states
-    interface->time_step_++; // this is for 1D internal use only. substep is not inlcuded.
-    // this is same time_step with 3D solver
+    // last_flag is "L" when it is at the last iteration
+    // last_flag is "D: when it is at the middel of 3D newton iteration
+    if (std::string(last_flag) == "L"){
+        // Update interface internal states
+        interface->time_step_++; // this is for 1D internal use only. substep is not inlcuded.
+        // this is same time_step with 3D solver
 
-    // print solution as vtk file
-    if (interface->time_step_ % save_time == 0) {
-        cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
-        cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
+        // print solution as vtk file
+        if (interface->time_step_ % save_time == 0) {
+            cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
+            cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
+        }
     }
     
 
