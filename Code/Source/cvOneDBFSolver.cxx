@@ -2121,8 +2121,7 @@ cvOneDFEAVector* cvOneDBFSolver::SolveSingleTimeStep(double currentTimeInput, do
         }
         
         // Check convergence (Newton iteration)
-        if((currentTime != deltaTime || (currentTime == deltaTime && iter != 0)) && 
-           normf < convCriteria && norms < convCriteria) {
+        if(iter > 0 && normf < convCriteria && norms < convCriteria) {
             cout << "    iter: " << std::to_string(iter) << " normf: " << std::to_string(normf) << " norms: " << std::to_string(norms) << endl;
             break;
         }
