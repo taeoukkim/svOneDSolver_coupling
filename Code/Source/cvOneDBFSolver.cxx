@@ -1283,6 +1283,87 @@ void cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(
 
 }
 
+// =====================================================
+// WRITE TEXT RESULTS FOR A SINGLE TIME STEP (COUPLING)
+// =====================================================
+void cvOneDBFSolver::postprocess_Text_SingleTimeStep(int timeStep,
+                                                     cvOneDFEAVector* solution_ptr){
+  double* solution_data = solution_ptr->GetEntries();
+  int elCount = 0;
+  
+  for(int fileIter = 0; fileIter < model->getNumberOfSegments(); fileIter++){
+    cvOneDSegment* curSeg = model->getSegment(fileIter);
+    cvOneDMaterial* curMat = subdomainList[fileIter]->GetMaterial();
+    long numEls = curSeg->getNumElements();
+    double segLength = curSeg->getSegmentLength();
+    long startOut = elCount;
+    long finishOut = elCount + ((numEls + 1) * 2);
+
+    string base = string(model->getModelName()) + string(curSeg->getSegmentName());
+
+    string flowFile     = base + "_flow.dat";
+    string areaFile     = base + "_area.dat";
+    string pressureFile = base + "_pressure.dat";
+    string reFile       = base + "_Re.dat";
+    string wssFile      = base + "_wss.dat";
+
+    ofstream flow, area, pressure, reynolds, wss;
+    flow.open(flowFile.c_str(), ios::app);
+    area.open(areaFile.c_str(), ios::app);
+    pressure.open(pressureFile.c_str(), ios::app);
+    reynolds.open(reFile.c_str(), ios::app);
+    wss.open(wssFile.c_str(), ios::app);
+
+    if(!flow.is_open() || !area.is_open() || !pressure.is_open() ||
+       !reynolds.is_open() || !wss.is_open()){
+      printf("ERROR: Could not open txt output files for segment %s at time step %d\n",
+             curSeg->getSegmentName(), timeStep);
+      elCount += 2 * (numEls + 1);
+      continue;
+    }
+
+    flow.precision(OUTPUT_PRECISION);
+    area.precision(OUTPUT_PRECISION);
+    pressure.precision(OUTPUT_PRECISION);
+    reynolds.precision(OUTPUT_PRECISION);
+    wss.precision(OUTPUT_PRECISION);
+    // Output flow for each node (one value per node, one row)
+    for(int j = startOut + 1; j < finishOut; j += 2){
+      flow << solution_data[j] << " ";
+    }
+    flow << endl;
+    // Output area, pressure, Reynolds, WSS for each node (one value per node, one row)
+    int section = 0;
+    for(int j = startOut; j < finishOut; j += 2){
+      double z = (section / double(numEls)) * segLength;
+      double val_area = solution_data[j];
+      double val_flow = solution_data[j + 1];
+      double r = sqrt(val_area / M_PI);
+      double Re = curMat->GetDensity() / curMat->GetDynamicViscosity()
+                  * val_flow / sqrt(val_area) * sqrt(4.0 / M_PI);
+      double val_pressure = curMat->GetPressure(val_area, z);
+      double wssVal = (4.0 * curMat->GetDynamicViscosity() * val_flow)
+                      / (M_PI * r * r * r);
+      area << val_area << " ";
+      pressure << val_pressure << " ";
+      reynolds << Re << " ";
+      wss << wssVal << " ";
+      section++;
+    }
+    area << endl;
+    pressure << endl;
+    reynolds << endl;
+    wss << endl;
+    elCount += 2 * (numEls + 1);
+    flow.close();
+    area.close();
+    pressure.close();
+    reynolds.close();
+    wss.close();
+  }
+}
+
+
 
 
 

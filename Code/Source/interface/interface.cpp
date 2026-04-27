@@ -743,11 +743,14 @@ void run_1d_simulation_step_1d(int problem_id, double current_time, int save_tim
         interface->time_step_++; // this is for 1D internal use only. substep is not inlcuded.
         // this is same time_step with 3D solver
 
-        // print solution as vtk file
+        // print solution as vtk file and txt files
         if (interface->time_step_ % save_time == 0) {
             cout << "generate vtk file at time step: "<< static_cast<int>(interface->time_step_) << endl;
             cvOneDBFSolver::postprocess_VTK_XML3D_SingleTimeStep(interface->time_step_, solution_ptr);
+            cout << "generate txt files at time step: "<< static_cast<int>(interface->time_step_) << endl;
+            cvOneDBFSolver::postprocess_Text_SingleTimeStep(interface->time_step_, solution_ptr);
         }
+        
     }
     
 

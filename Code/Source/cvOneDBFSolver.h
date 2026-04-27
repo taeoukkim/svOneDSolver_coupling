@@ -84,6 +84,8 @@ class cvOneDBFSolver{
                                           double* solution_vector);
     static void postprocess_VTK_XML3D_SingleTimeStep(int timeStep, 
                                                     cvOneDFEAVector* solution_ptr);
+    static void postprocess_Text_SingleTimeStep(int timeStep,
+                                               cvOneDFEAVector* solution_ptr);
     static void extractCplBC(double* solution_data, double& CplValue, char* coupling_types);
     static void extractCplDOF(int& cpldof, char* coupling_types);
 
